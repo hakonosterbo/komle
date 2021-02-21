@@ -1,10 +1,12 @@
 import os
 import requests
 import sys
+import pyxb
+from enum import Enum
 from suds.client import Client
 from suds.transport.http import HttpAuthenticated
 from suds.transport import Reply
-from typing import Union
+from typing import Union, List, Dict, Any
 
 if 'komle.bindings.v1411.write' in sys.modules:
     # Witsml uses the same namespace for each schema
@@ -249,3 +251,148 @@ class StoreClient:
                                                                     )
     
         return _parse_reply(reply_wellbores)
+
+class ReturnElements(str, Enum):
+    All                 = 'all'
+    IdOnly              = 'id-only'
+    HeaderOnly          = 'header-only'
+    DataOnly            = 'data-only'
+    StationLocationOnly = 'station-location-only'
+    LatestChangeOnly    = 'latest-change-only'
+    Requested           = 'requested'
+
+class StoreGenericClient:
+    def __init__(self, service_url: str, username: str, password: str,
+                 agent_name: str='komle', verify: Union[bool,str]=True):
+        '''Create a GetFromStore client
+
+        This initializes the client with a local version of WMLS.WSDL 1.4 from energistics.
+
+        Args:
+            service_url (str): url giving the location of the Store
+            username (str): username on the service
+            password (str): password on the service
+            agent_name (str): User-Agent name to pass in header
+            verify (bool|str): Whether to verify TLS certificates, or path to local cacerts file
+        '''
+
+        self.soap_client = simple_client(service_url,
+                                         username, password,
+                                         agent_name, verify)
+
+    def list(self, object_type: Union[str,type],
+             returnElements: Union[ReturnElements,str]=ReturnElements.IdOnly,
+             **selector):
+        '''List objects from a witsml store server
+
+        The default is to return id-only for all objects
+
+        Args:
+            object_type (str|type): The name or type of the witsml type to query (e.g., 'wellbore'
+                                                                          or witsml.obj_wellbore)
+            returnElements (ReturnElements|str): Which data to get
+            selector (kwargs): Filter for objects, if no kwargs are specified then all objects
+                               are returned
+
+        Returns:
+            pyxb.binding.content._PluralBinding: The returned objects of the given type
+
+        Raises:
+            TypeError: Object type is not a queryable WITSML type
+            TypeError: Selector contains field(s) not appropriate for type
+            ValueError: Invalid returnElements specification
+            StoreException: If the soap server replies with an error
+            pyxb.exception: If the reply is empty or the document fails to validate a pyxb exception is raised
+
+        Examples:
+            >>> wb = client.list('wellbore')  # or witsml.obj_wellbore
+            >>> ku.plural_dict(wb)
+            {'name': ['wellb1', 'wellb2', 'wellb3', ...]}
+            >>> wb = client.list('wellbore', operator='Tigergutt')
+            >>> ku.plural_dict(wb)
+            {'name': ['wellb1', 'wellb3']}
+            >>> wb = client.list('wellbore', 'all', operator='Tigergutt')
+            >>> ku.plural_dict(wb)
+            {'name': ['wellb1', 'wellb3'], 'operator': ['Tigergutt', 'Tigergutt'], ...}
+        '''
+        return self.get(object_type, [selector], returnElements=returnElements)
+
+
+    def get(self, object_type: Union[str,type],
+            selectors: List[Dict[str,Any]],
+            returnElements: Union[ReturnElements,str]=ReturnElements.All):
+        '''Get selected objects from a witsml store server
+
+        The default is to return all data for the selected objects.
+
+        Args:
+            object_type (str|type): The name or type of the witsml type to query (e.g., 'wellbore'
+                                                                          or witsml.obj_wellbore)
+            selectors (list of dicts): Arguments to the witsml type, specifying which objects to query,
+            returnElements (ReturnElements|str): Which data to get
+        Returns:
+            pyxb.binding.content._PluralBinding: The returned objects of the given type
+
+        Raises:
+            TypeError: Object type is not a queryable WITSML type
+            TypeError: Selectors list is empty, or contain field(s) not appropriate for type
+            ValueError: Invalid returnElements specification
+            StoreException: If the soap server replies with an error
+            pyxb.exception: If the reply is empty or the document fails to validate a pyxb exception is raised
+
+        Examples:
+            >>> wb = client.get('wellbore',  # or witsml.obj_wellbore
+                                selectors=[dict(name='wellb1'), dict(name=wellb2)])
+            >>> ku.plural_dict(wb)
+            {'name': ['wellb1', 'wellb2'], 'operator': ['Tigergutt', 'Brumm'], ...}
+        '''
+        try:
+            if isinstance(object_type, str):
+                object_type = getattr(witsml, f'obj_{object_type}')
+            objects = [object_type(**selector) for selector in selectors]
+        except Exception as e:
+            raise TypeError(str(e))
+        return self.get_objects(objects, returnElements=returnElements)
+
+
+    def get_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition],
+                    returnElements: Union[ReturnElements,str]=ReturnElements.All):
+        '''Get selected objects from a witsml store server
+
+        The default is to return all data for the selected objects.
+
+        Args:
+            objects (list of objects): Objects to query, must be all of the same type
+            returnElements (ReturnElements|str): Which data to get
+        Returns:
+            pyxb.binding.content._PluralBinding: The returned objects of the given type
+
+        Raises:
+            TypeError: Objects list is empty, or objects are not all of same queryable type
+            ValueError: Invalid returnElements specification
+            StoreException: If the soap server replies with an error
+            pyxb.exception: If the reply is empty or the document fails to validate a pyxb exception is raised
+
+        Examples:
+            >>> wb = client.get_objects([witsml.obj_wellbore(name='wellb1'),
+                                         witsml.obj_wellbore(name='wellb2')])
+            >>> ku.plural_dict(wb)
+            {'name': ['wellb1', 'wellb2'], 'operator': ['Tigergutt', 'Brumm'], ...}
+        '''
+        try:
+            object_type = type(objects[0])
+            _, _, typename = object_type._Name().rpartition('obj_')
+            container_type = getattr(witsml, f'{typename}s')
+        except Exception as e:
+            raise TypeError(str(e))
+
+        q_objs = container_type(version=witsml.__version__)
+        for q_obj in objects:
+            if isinstance(q_obj, object_type):
+                q_objs.append(q_obj)
+            else:
+                raise TypeError(f"'{q_obj}' is not of type '{object_type}'")
+
+        options = f'returnElements={ReturnElements(returnElements)}'
+        reply = self.soap_client.service.WMLS_GetFromStore(typename, q_objs.toxml(), OptionsIn=options)
+        return getattr(_parse_reply(reply), typename)
