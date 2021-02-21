@@ -1,5 +1,5 @@
 import sys
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Any
 from collections import OrderedDict
 import pyxb
 
@@ -66,6 +66,69 @@ def logdata_dict(log: 'witsml.obj_log', fill_missing: bool=True) -> Dict[str, Li
                 data_list[i][2].append(None)
     
     return {mnem:values for mnem, _, values in data_list}
+
+def to_plain(obj: 'witsml',
+            include_attr: bool=False,
+            prefix_attr: str='',
+            delimiter: str='.',
+            transpose: bool=False) -> Union[List,Dict[str, Any]]:
+    '''Create a nested dict or list of plain python datatypes from a witsml object
+
+    Args:
+        obj(witsml.obj_...): A singular or plural witsml object
+        include_attr(bool): Also take attributes
+        prefix_attr(str): Give attributes a prefix for example @, default no prefix
+        delimiter(str): Delimiter between object name and attribute name
+        transpose (bool): Create dict-of-lists instead of lists-of-dicts for plurals
+
+    Returns:
+        dict|list: A dict or list representation of the witsml object(s), where values are plain datatypes
+    '''
+
+    def any_to_plain(obj):
+        if isinstance(obj, (pyxb.binding.content._PluralBinding, list)):
+            return plural_to_dict_of_lists(obj) if transpose else plural_to_list_of_plains(obj)
+        elif obj.__class__.__name__ == 'obj_log':
+            return logdata_dict(obj)
+        else:
+            return singular_to_plain(obj)
+
+    def singular_to_plain(obj):
+        if not isinstance(obj, pyxb.binding.basis.complexTypeDefinition):
+            return obj;
+        elif obj._ContentTypeTag in (obj._CT_EMPTY, obj._CT_SIMPLE):
+            return obj.value()
+        else:
+            as_dict = {}
+            if include_attr and hasattr(obj, '_AttributeMap'):
+                for attr_use in obj._AttributeMap.values():
+                    as_dict[prefix_attr+attr_use.id()] = attr_use.value(obj)
+            names = [cont.elementDeclaration.id() for cont in obj.orderedContent() if cont.elementDeclaration is not None]
+            # orderedContent() returns the PluralBindings repeatedly, because they may have ordering
+            # interleaved with other elements. We disregard that possibility, and process the
+            # PluralBinding once in order of first occurrence. (regular dicts are ordered in CPython3.6+, Python3.7+)
+            for next_path in dict.fromkeys(names):
+                    next_obj = getattr(obj, next_path)
+                    if include_attr and hasattr(next_obj, '_AttributeMap'):
+                        for attr_use in next_obj._AttributeMap.values():
+                            as_dict[next_path+delimiter+prefix_attr+attr_use.id()] = attr_use.value(next_obj)
+                    as_dict[next_path] = any_to_plain(next_obj)
+            return as_dict
+
+    def plural_to_list_of_plains(plural_obj):
+        return [any_to_plain(obj) for obj in plural_obj]
+
+    def plural_to_dict_of_lists(plural_obj):
+        frame_list = []
+        all_keys = {}
+        for obj in plural_obj:
+            as_dict = any_to_plain(obj)
+            frame_list.append(as_dict)
+            all_keys.update(as_dict) # values don't matter, we only care about the keys
+        return {key: [frame.get(key, None) for frame in frame_list] for key in all_keys}
+
+    return any_to_plain(obj)
+
 
 def obj_dict(obj: 'witsml', 
              include_attr: bool=False,
