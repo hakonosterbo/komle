@@ -262,6 +262,8 @@ class ReturnElements(str, Enum):
     Requested           = 'requested'
 
 class StoreGenericClient:
+    witsml = witsml # can be used instead of import by caller
+
     def __init__(self, service_url: str, username: str, password: str,
                  agent_name: str='komle', verify: Union[bool,str]=True):
         '''Create a GetFromStore client
@@ -396,3 +398,39 @@ class StoreGenericClient:
         options = f'returnElements={ReturnElements(returnElements)}'
         reply = self.soap_client.service.WMLS_GetFromStore(typename, q_objs.toxml(), OptionsIn=options)
         return getattr(_parse_reply(reply), typename)
+
+    def add_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
+        try:
+            object_type = type(objects[0])
+            _, _, typename = object_type._Name().rpartition('obj_')
+            container_type = getattr(witsml, f'{typename}s')
+        except Exception as e:
+            raise TypeError(str(e))
+
+        q_objs = container_type(version=witsml.__version__)
+        for q_obj in objects:
+            if isinstance(q_obj, object_type):
+                q_objs.append(q_obj)
+            else:
+                raise TypeError(f"'{q_obj}' is not of type '{object_type}'")
+
+        reply = self.soap_client.service.WMLS_AddToStore(typename, q_objs.toxml())
+        _parse_reply(reply)
+
+    def delete_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
+        try:
+            object_type = type(objects[0])
+            _, _, typename = object_type._Name().rpartition('obj_')
+            container_type = getattr(witsml, f'{typename}s')
+        except Exception as e:
+            raise TypeError(str(e))
+
+        q_objs = container_type(version=witsml.__version__)
+        for q_obj in objects:
+            if isinstance(q_obj, object_type):
+                q_objs.append(q_obj)
+            else:
+                raise TypeError(f"'{q_obj}' is not of type '{object_type}'")
+
+        reply = self.soap_client.service.WMLS_DeleteFromStore(typename, q_objs.toxml())
+        _parse_reply(reply)
