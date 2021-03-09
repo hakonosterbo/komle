@@ -68,10 +68,10 @@ class StoreException(Exception):
         self.reply = reply
 
 def _parse_reply(reply):
-    if reply.Result == 1:
-        return witsml.CreateFromDocument(reply.XMLout)
-    else:
+    if reply.Result <= 0:
         raise StoreException(reply)
+    if hasattr(reply, 'XMLout'):
+        return witsml.CreateFromDocument(reply.XMLout)
 
 class StoreClient:
     def __init__(self, service_url: str, username: str, password: str,
