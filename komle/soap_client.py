@@ -73,6 +73,16 @@ def _parse_reply(reply):
     if hasattr(reply, 'XMLout'):
         return witsml.CreateFromDocument(reply.XMLout)
 
+def _to_envelope(objects):
+    try:
+        object_type = type(objects[0])
+        _, _, typename = object_type._Name().rpartition('obj_')
+        envelope_type = getattr(witsml, f'{typename}s')
+    except Exception as e:
+        raise TypeError(str(e))
+    q_objs = envelope_type(*objects, version=witsml.__version__)
+    return typename, q_objs.toxml()
+
 class StoreClient:
     def __init__(self, service_url: str, username: str, password: str,
                  agent_name: str='komle', verify: Union[bool,str]=True):
@@ -370,7 +380,8 @@ class StoreGenericClient:
             pyxb.binding.content._PluralBinding: The returned objects of the given type
 
         Raises:
-            TypeError: Objects list is empty, or objects are not all of same queryable type
+            TypeError: Objects list is empty, or not a queryable type
+            pyxb.MixedContentError: Objects are not all of same type
             ValueError: Invalid returnElements specification
             StoreException: If the soap server replies with an error
             pyxb.exception: If the reply is empty or the document fails to validate a pyxb exception is raised
@@ -381,56 +392,26 @@ class StoreGenericClient:
             >>> ku.plural_dict(wb)
             {'name': ['wellb1', 'wellb2'], 'operator': ['Tigergutt', 'Brumm'], ...}
         '''
-        try:
-            object_type = type(objects[0])
-            _, _, typename = object_type._Name().rpartition('obj_')
-            container_type = getattr(witsml, f'{typename}s')
-        except Exception as e:
-            raise TypeError(str(e))
-
-        q_objs = container_type(version=witsml.__version__)
-        for q_obj in objects:
-            if isinstance(q_obj, object_type):
-                q_objs.append(q_obj)
-            else:
-                raise TypeError(f"'{q_obj}' is not of type '{object_type}'")
-
+        typename, xml = _to_envelope(objects)
         options = f'returnElements={ReturnElements(returnElements)}'
-        reply = self.soap_client.service.WMLS_GetFromStore(typename, q_objs.toxml(), OptionsIn=options)
+        reply = self.soap_client.service.WMLS_GetFromStore(typename, xml, OptionsIn=options)
         return getattr(_parse_reply(reply), typename)
 
     def add_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
-        try:
-            object_type = type(objects[0])
-            _, _, typename = object_type._Name().rpartition('obj_')
-            container_type = getattr(witsml, f'{typename}s')
-        except Exception as e:
-            raise TypeError(str(e))
-
-        q_objs = container_type(version=witsml.__version__)
-        for q_obj in objects:
-            if isinstance(q_obj, object_type):
-                q_objs.append(q_obj)
-            else:
-                raise TypeError(f"'{q_obj}' is not of type '{object_type}'")
-
-        reply = self.soap_client.service.WMLS_AddToStore(typename, q_objs.toxml())
+        typename, xml = _to_envelope(objects)
+        reply = self.soap_client.service.WMLS_AddToStore(typename, xml)
         _parse_reply(reply)
 
-    def delete_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
+    def delete(self, object_type: Union[str,type], **selector):
         try:
-            object_type = type(objects[0])
-            _, _, typename = object_type._Name().rpartition('obj_')
-            container_type = getattr(witsml, f'{typename}s')
+            if isinstance(object_type, str):
+                object_type = getattr(witsml, f'obj_{object_type}')
+            objects = [object_type(**selector)]
         except Exception as e:
             raise TypeError(str(e))
+        self.delete_objects(objects)
 
-        q_objs = container_type(version=witsml.__version__)
-        for q_obj in objects:
-            if isinstance(q_obj, object_type):
-                q_objs.append(q_obj)
-            else:
-                raise TypeError(f"'{q_obj}' is not of type '{object_type}'")
-
-        reply = self.soap_client.service.WMLS_DeleteFromStore(typename, q_objs.toxml())
+    def delete_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
+        typename, xml = _to_envelope(objects)
+        reply = self.soap_client.service.WMLS_DeleteFromStore(typename, xml)
         _parse_reply(reply)
