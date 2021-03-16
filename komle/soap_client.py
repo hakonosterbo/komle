@@ -415,3 +415,8 @@ class StoreGenericClient:
         typename, xml = _to_envelope(objects)
         reply = self.soap_client.service.WMLS_DeleteFromStore(typename, xml)
         _parse_reply(reply)
+
+    def update_objects(self, objects:List[pyxb.binding.basis.complexTypeDefinition]):
+        typename, xml = _to_envelope(objects)
+        reply = self.soap_client.service.WMLS_UpdateInStore(typename, xml)
+        _parse_reply(reply)
