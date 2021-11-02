@@ -13,7 +13,7 @@ setup(
                     'komle': ['WMLS.WSDL', 'witsmlUnitDict.xml'],
                    },
       install_requires=['suds-py3==1.4.0.0',
-                        'PyXB==1.2.6',
+                        'PyXB-X==1.2.6',
 
                        ], 
       tests_require=[
