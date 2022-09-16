@@ -63,10 +63,10 @@ def simple_client(service_url: str, username: str, password: str,
     return client
 
 class StoreException(Exception):
-    def __init__(self, reply, message):
-        super().__init__(f'{reply.Result} : {message} - {reply.SuppMsgOut}')
+    def __init__(self, reply, base_message):
+        super().__init__(f'{reply.Result} : {base_message} - {reply.SuppMsgOut}')
         self.reply = reply
-        self.message = message
+        self.message = base_message
 
 def _to_envelope(objects):
     try:
@@ -101,10 +101,10 @@ class BaseClient:
     def _parse_reply(self, reply):
         if reply.Result <= 0:
             try:
-                msg = self.soap_client.service.WMLS_GetBaseMsg(reply.Result)
+                message = self.soap_client.service.WMLS_GetBaseMsg(reply.Result)
             except:
-                msg = 'Could not parse error code'
-            raise StoreException(reply, msg)
+                message = 'Could not parse error code'
+            raise StoreException(reply, message)
         if hasattr(reply, 'XMLout'):
             return witsml.CreateFromDocument(reply.XMLout)
 
