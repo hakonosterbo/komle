@@ -63,15 +63,10 @@ def simple_client(service_url: str, username: str, password: str,
     return client
 
 class StoreException(Exception):
-    def __init__(self, reply):
-        super().__init__(f'{reply.Result}: {reply.SuppMsgOut}')
+    def __init__(self, reply, base_message):
+        super().__init__(f'{reply.Result} : {base_message} - {reply.SuppMsgOut}')
         self.reply = reply
-
-def _parse_reply(reply):
-    if reply.Result <= 0:
-        raise StoreException(reply)
-    if hasattr(reply, 'XMLout'):
-        return witsml.CreateFromDocument(reply.XMLout)
+        self.message = base_message
 
 def _to_envelope(objects):
     try:
@@ -83,7 +78,7 @@ def _to_envelope(objects):
     q_objs = envelope_type(*objects, version=witsml.__version__)
     return typename, q_objs.toxml()
 
-class StoreClient:
+class BaseClient:
     def __init__(self, service_url: str, username: str, password: str,
                  agent_name: str='komle', verify: Union[bool,str]=True):
         '''Create a GetFromStore client, 
@@ -103,7 +98,18 @@ class StoreClient:
                                          password,
                                          agent_name,
                                          verify)
-    
+    def _parse_reply(self, reply):
+        if reply.Result <= 0:
+            try:
+                message = self.soap_client.service.WMLS_GetBaseMsg(reply.Result)
+            except:
+                message = 'Could not parse error code'
+            raise StoreException(reply, message)
+        if hasattr(reply, 'XMLout'):
+            return witsml.CreateFromDocument(reply.XMLout)
+
+class StoreClient (BaseClient):
+  
     def get_bhaRuns(self, 
                     q_bha: witsml.obj_bhaRun,
                     returnElements: str='id-only') -> witsml.bhaRuns:
@@ -133,7 +139,7 @@ class StoreClient:
                                                                 OptionsIn=f'returnElements={returnElements}'
                                                                )
     
-        return _parse_reply(reply_bhas)
+        return self._parse_reply(reply_bhas)
 
 
     def get_logs(self, 
@@ -166,7 +172,7 @@ class StoreClient:
                                                                 OptionsIn=f'returnElements={returnElements}'
                                                                )
 
-        return _parse_reply(reply_logs)
+        return self._parse_reply(reply_logs)
 
     def get_mudLogs(self, 
                     q_mudlog: witsml.obj_mudLog,
@@ -198,7 +204,7 @@ class StoreClient:
                                                                    OptionsIn=f'returnElements={returnElements}'
                                                                   )
     
-        return _parse_reply(reply_mudlogs)
+        return self._parse_reply(reply_mudlogs)
 
     def get_trajectorys(self, 
                         q_traj: witsml.obj_trajectory,
@@ -229,7 +235,7 @@ class StoreClient:
                                                                 OptionsIn=f'returnElements={returnElements}'
                                                                )
     
-        return _parse_reply(reply_traj)
+        return self._parse_reply(reply_traj)
 
     def get_wellbores(self, 
                       q_wellbore: witsml.obj_wellbore,
@@ -260,7 +266,7 @@ class StoreClient:
                                                                      OptionsIn=f'returnElements={returnElements}'
                                                                     )
     
-        return _parse_reply(reply_wellbores)
+        return self._parse_reply(reply_wellbores)
 
 class ReturnElements(str, Enum):
     All                 = 'all'
@@ -271,26 +277,8 @@ class ReturnElements(str, Enum):
     LatestChangeOnly    = 'latest-change-only'
     Requested           = 'requested'
 
-class StoreGenericClient:
+class StoreGenericClient(BaseClient):
     witsml = witsml # can be used instead of import by caller
-
-    def __init__(self, service_url: str, username: str, password: str,
-                 agent_name: str='komle', verify: Union[bool,str]=True):
-        '''Create a GetFromStore client
-
-        This initializes the client with a local version of WMLS.WSDL 1.4 from energistics.
-
-        Args:
-            service_url (str): url giving the location of the Store
-            username (str): username on the service
-            password (str): password on the service
-            agent_name (str): User-Agent name to pass in header
-            verify (bool|str): Whether to verify TLS certificates, or path to local cacerts file
-        '''
-
-        self.soap_client = simple_client(service_url,
-                                         username, password,
-                                         agent_name, verify)
 
     def list(self, object_type: Union[str,type],
              returnElements: Union[ReturnElements,str]=ReturnElements.IdOnly,
@@ -395,12 +383,12 @@ class StoreGenericClient:
         typename, xml = _to_envelope(objects)
         options = f'returnElements={ReturnElements(returnElements)}'
         reply = self.soap_client.service.WMLS_GetFromStore(typename, xml, OptionsIn=options)
-        return getattr(_parse_reply(reply), typename)
+        return getattr(self._parse_reply(reply), typename)
 
     def add_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
         typename, xml = _to_envelope(objects)
         reply = self.soap_client.service.WMLS_AddToStore(typename, xml)
-        _parse_reply(reply)
+        self._parse_reply(reply)
 
     def delete(self, object_type: Union[str,type], **selector):
         try:
@@ -414,9 +402,9 @@ class StoreGenericClient:
     def delete_objects(self, objects: List[pyxb.binding.basis.complexTypeDefinition]):
         typename, xml = _to_envelope(objects)
         reply = self.soap_client.service.WMLS_DeleteFromStore(typename, xml)
-        _parse_reply(reply)
+        self._parse_reply(reply)
 
     def update_objects(self, objects:List[pyxb.binding.basis.complexTypeDefinition]):
         typename, xml = _to_envelope(objects)
         reply = self.soap_client.service.WMLS_UpdateInStore(typename, xml)
-        _parse_reply(reply)
+        self._parse_reply(reply)
