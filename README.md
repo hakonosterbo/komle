@@ -1,6 +1,6 @@
 # komle
 
-komle, a python library for WITSML, uses [PyXB](http://pyxb.sourceforge.net/) to marshal/unmarshal xml files according to the schemas. 
+komle, a python library for WITSML, uses [PyXB-X](https://pypi.org/project/PyXB-X/) to marshal/unmarshal xml files according to the schemas. 
 
 Some of the features are:
 
